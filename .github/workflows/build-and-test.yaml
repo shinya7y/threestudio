@@ -1,0 +1,61 @@
+name: build-and-test
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+    container:
+      image: nvidia/cuda:11.8.0-devel-ubuntu22.04
+    strategy:
+      matrix:
+        python-version: ['3.10']
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Set compute capability for nerfacc and tiny-cuda-nn
+      # dummy settings due to no GPU
+      - name: Set environment variables
+        run: |
+          echo "TORCH_CUDA_ARCH_LIST='8.6'" >> "$GITHUB_ENV"
+          echo "TCNN_CUDA_ARCHITECTURES=86" >> "$GITHUB_ENV"
+      - name: apt install
+        run: |
+          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            git \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libgles2-mesa-dev \
+            libglib2.0-0 \
+            libsm6 \
+            libxext6 \
+            libxrender1 \
+            python-is-python3 \
+            python${{ matrix.python-version }}-dev \
+            python3-pip \
+            wget \
+            && rm -rf /var/lib/apt/lists/*
+      - name: Upgrade pip and install ninja
+        run: pip install --upgrade pip setuptools ninja
+      - name: Install PyTorch
+        run: pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 --index-url https://download.pytorch.org/whl/cu118
+      # Install nerfacc and tiny-cuda-nn before installing requirements.txt
+      # because these two installations are time consuming and error prone
+      - name: Install nerfacc
+        run: BUILD_NO_CUDA=1 pip install git+https://github.com/KAIR-BAIR/nerfacc.git@v0.5.2
+      - name: Install tiny-cuda-nn
+        run: pip install git+https://github.com/NVlabs/tiny-cuda-nn.git#subdirectory=bindings/torch
+      - name: Install requirements.txt
+        run: pip install -r requirements.txt
+      - name: Install requirements-dev.txt
+        run: pip install -r requirements-dev.txt
+      - name: Run pytest
+        run: PYTHONPATH=. pytest --cov=threestudio tests/

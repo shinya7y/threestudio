@@ -1,4 +1,5 @@
 black
 mypy
-pylint
 pre-commit
+pylint
+pytest-cov
